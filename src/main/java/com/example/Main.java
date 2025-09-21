@@ -11,100 +11,119 @@ import java.time.LocalDate;
 public class Main {
     public static void main(String[] args) {
 
-
-        //Läser in zon
-        String zone = System.console().readLine("What zone are you in? (SE1, SE2, SE3 SE4): ");
-        zone = zone.toUpperCase();
-
-        if  (zone.equals("SE1") || zone.equals("SE2") || zone.equals("SE3") || zone.equals("SE4")) {
-            System.out.println("Zone: " + zone);
-        } else {
-            System.out.println("Invalid zone");
-            System.out.println("Available Zones: SE1, SE2, SE3 SE4");
-            System.exit(1);
-        }
-        ElpriserAPI.Prisklass selectedZone = ElpriserAPI.Prisklass.valueOf(zone);
-
-        //Läser in laddtid
-        String inputHours = System.console().readLine("Please enter the charging time: (2/4/8) hours: ");
-        int chargingTime;
-
-        try {
-            chargingTime = Integer.parseInt(inputHours);
-        } catch (NumberFormatException e) {
-            System.out.println("Invalid input, please enter 2, 4 or 8.");
-            return;
-        }
-
-        if (chargingTime == 2 || chargingTime == 4 || chargingTime == 8) {
-            System.out.println("Time: " + chargingTime + "h");
-        } else {
-            System.out.println("Invalid charging time");
-            System.out.println("Available Times: 2h/4h/8h");
-            System.exit(1);
-        }
-        //Läser in start + slutdatum
-        System.out.println("Please enter the end date (YYYY-MM-DD)");
-        System.out.println("Or press enter for 24h ahead");
-        String input = System.console().readLine(": ");
+        String zone = null;
+        int chargingTime = 0;
         LocalDate startDate = LocalDate.now();
         LocalDate endDate = LocalDate.now();
+        boolean sorted = false;
 
-        if (input.isEmpty()) {
-            endDate = startDate.plusDays(1);
-        } else {
-            endDate = LocalDate.parse(input);
-
-            if (endDate.isBefore(startDate)) {
-                System.out.println("Invalid end date!");
-                System.exit(1);
+        for (int i = 0; i < args.length; i++) {
+            switch (args[i]) {
+                case "--zone":
+                    if (i + 1 < args.length) {
+                        zone = args[++i].toLowerCase();
+                    }
+                    break;
+                case "--date":
+                    if (i + 1 < args.length) {
+                        try {
+                            endDate = LocalDate.parse(args[++i]);
+                        } catch (Exception e) {
+                            System.out.println("Fel datum format! Använd (yyyy-MM-dd");
+                            System.exit(1);
+                        }
+                    }
+                    break;
+                case "--charging":
+                    if (i + 1 < args.length) {
+                        String value = args[++i].toLowerCase().replace("h", "");
+                        try {
+                            chargingTime = Integer.parseInt(value);
+                            if (chargingTime != 2 && chargingTime != 3 && chargingTime != 8)
+                                throw new NumberFormatException();
+                        } catch (NumberFormatException e) {
+                            System.out.println("Ogiltig tidintervall! Använd 2h, 4h, eller 8h");
+                            System.exit(1);
+                        }
+                    }
+                    break;
+                case "--sorterad":
+                    sorted = true;
+                    break;
             }
         }
 
+        if (zone == null) {
+            System.out.println("Error: --zone är obligatorisk");
+            System.exit(1);
+        }
+        if (!zone.equals("SE1") && !zone.equals("SE2") && !zone.equals("SE3") && !zone.equals("SE4")) {
+            System.out.println("Ogiltig zone! Använd: SE1, SE2, SE3, SE4");
+            System.exit(1);
+        }
 
-        double minCost = Double.MAX_VALUE;
-        double maxCost = Double.MIN_VALUE;
-        ZonedDateTime minStart = null;
-        ZonedDateTime minEnd = null;
-        ZonedDateTime maxStart = null;
-        ZonedDateTime maxEnd = null;
+        ElpriserAPI.Prisklass selectedZone = ElpriserAPI.Prisklass.valueOf(zone);
+
+        if (endDate.isBefore(startDate)) {
+            System.out.println("Slut datumet kan inte vara innan start datum. Visar 24h farmåt");
+            endDate = startDate.plusDays(1);
+        }
 
         ElpriserAPI api = new ElpriserAPI();
+        List<ElpriserAPI.Elpris> allPrices = new ArrayList<>();
 
         for (LocalDate d = startDate; !d.isAfter(endDate); d = d.plusDays(1)) {
-            List<ElpriserAPI.Elpris> dailyPrices = api.getPriser(d, selectedZone);
-            if (dailyPrices.isEmpty()) {
-                continue;
-            }
-            dailyPrices.sort((a, b) -> a.timeStart().compareTo(b.timeStart()));
+            List<ElpriserAPI.Elpris> dagspris = api.getPriser(d, selectedZone);
+            allPrices.addAll(dagspris);
+        }
+        if (allPrices.isEmpty()) {
+            System.out.println("Inga priser tillgängliga");
+            System.exit(1);
+        }
 
-            for (int i = 0; i <= dailyPrices.size() - chargingTime; i++) {
-                double sum = 0;
+        allPrices.sort((a, b) -> a.timeStart().compareTo(b.timeStart()));
+
+        double sumPrice = 0;
+        for (ElpriserAPI.Elpris p : allPrices) sumPrice += p.sekPerKWh();
+        double meanPrice = sumPrice / allPrices.size();
+        System.out.println("Medelvärdet: " + meanPrice);
+
+        if (chargingTime > 0) {
+            double minCost = Double.MAX_VALUE;
+            double maxCost =  Double.MIN_VALUE;
+            ZonedDateTime minStart = null;
+            ZonedDateTime minEnd = null;
+            ZonedDateTime maxStart = null;
+            ZonedDateTime maxEnd = null;
+
+            for (int i = 0; i < allPrices.size() - chargingTime; i++) {
+                double windowSum = 0;
                 for (int j = 0; j < chargingTime; j++) {
-                    sum += dailyPrices.get(i + j).sekPerKWh();
+                    windowSum += allPrices.get(i + j).sekPerKWh();
                 }
-
-                if (sum < minCost) {
-                    minCost = sum;
-                    minStart = dailyPrices.get(i).timeStart();
-                    minEnd = dailyPrices.get(i + chargingTime - 1).timeEnd();
+                if (windowSum < minCost) {
+                    minCost = windowSum;
+                    minStart = allPrices.get(i).timeStart();
+                    minEnd = allPrices.get(i + chargingTime - 1).timeEnd();
                 }
-                if (sum > maxCost) {
-                    maxCost = sum;
-                    maxStart = dailyPrices.get(i).timeStart();
-                    maxEnd = dailyPrices.get(i + chargingTime - 1).timeEnd();
+                if (windowSum > maxCost) {
+                    maxCost = windowSum;
+                    maxStart = allPrices.get(i).timeStart();
+                    maxEnd = allPrices.get(i + chargingTime - 1).timeEnd();
                 }
+                System.out.println("Laddtid: " + chargingTime + "h");
+                System.out.println("Lägst kostnad: " + minCost + " Mellan: " + minStart.toLocalTime() + " - " + minEnd.toLocalTime());
+                System.out.println("Högt kostnad: " + maxCost + " Mellan: " + maxStart.toLocalTime() + " - " + maxEnd.toLocalTime());
             }
         }
 
-        if (minStart != null && maxStart != null) {
-            System.out.println("Charging time: " + chargingTime + "h");
-            System.out.println("Minimum cost: " + minCost + "h, between " + minStart.toLocalTime() + " and " + minEnd.toLocalTime());
-            System.out.println("Maximum cost: " + maxCost + "h, between " + maxStart.toLocalTime() + " and " + maxEnd.toLocalTime());
 
-        } else {
-            System.out.println("No prices available");
-        }
+
+
 
     }
 }
+
+
+
+
