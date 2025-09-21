@@ -26,22 +26,41 @@ public class Main {
         ElpriserAPI.Prisklass selectedZone = ElpriserAPI.Prisklass.valueOf(zone);
 
         //Läser in laddtid
-        int chargingTime = Integer.parseInt(System.console().readLine("Please enter the charging time: (2h/4h/8h)"));
+        String inputHours = System.console().readLine("Please enter the charging time: (2/4/8) hours: ");
+        int chargingTime;
+
+        try {
+            chargingTime = Integer.parseInt(inputHours);
+        } catch (NumberFormatException e) {
+            System.out.println("Invalid input, please enter 2, 4 or 8.");
+            return;
+        }
 
         if (chargingTime == 2 || chargingTime == 4 || chargingTime == 8) {
             System.out.println("Time: " + chargingTime + "h");
         } else {
             System.out.println("Invalid charging time");
-            System.out.println("Available Time: 2h/4h/8h");
+            System.out.println("Available Times: 2h/4h/8h");
             System.exit(1);
         }
         //Läser in start + slutdatum
+        System.out.println("Please enter the end date (YYYY-MM-DD)");
+        System.out.println("Or press enter for 24h ahead");
+        String input = System.console().readLine(": ");
         LocalDate startDate = LocalDate.now();
-        LocalDate endDate = LocalDate.parse(System.console().readLine("Please enter the end date (YYYY-MM-DD): "));
-        if (endDate.isBefore(startDate)) {
-            System.out.println("Invalid end date");
-            System.exit(1);
+        LocalDate endDate = LocalDate.now();
+
+        if (input.isEmpty()) {
+            endDate = startDate.plusDays(1);
+        } else {
+            endDate = LocalDate.parse(input);
+
+            if (endDate.isBefore(startDate)) {
+                System.out.println("Invalid end date!");
+                System.exit(1);
+            }
         }
+
 
         double minCost = Double.MAX_VALUE;
         double maxCost = Double.MIN_VALUE;
@@ -79,28 +98,13 @@ public class Main {
         }
 
         if (minStart != null && maxStart != null) {
-            System.out.println("Cheapest " + chargingTime + "h charging window: "
-                    + minStart.toLocalTime() + " - " + minEnd.toLocalTime()
-                    + ", total cost; " + minCost + " SEK");
-
-            System.out.println("Most expensive " + chargingTime + "h charging window: "
-                    + maxStart.toLocalTime() + " - " + maxEnd.toLocalTime()
-                    + ", total cost: " + maxCost + " SEK" );
+            System.out.println("Charging time: " + chargingTime + "h");
+            System.out.println("Minimum cost: " + minCost + "h, between " + minStart.toLocalTime() + " and " + minEnd.toLocalTime());
+            System.out.println("Maximum cost: " + maxCost + "h, between " + maxStart.toLocalTime() + " and " + maxEnd.toLocalTime());
 
         } else {
             System.out.println("No prices available");
         }
-
-
-
-
-
-
-
-
-
-
-
 
     }
 }
