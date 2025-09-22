@@ -16,7 +16,7 @@ public class Main {
         String zone = null;
         int chargingTime = 0;
         LocalDate startDate = LocalDate.now();
-        LocalDate endDate = LocalDate.now();
+        LocalDate endDate = startDate;
         boolean sorted = false;
 
         //Läser in argument
@@ -33,7 +33,6 @@ public class Main {
                             endDate = LocalDate.parse(args[++i]);
                         } catch (Exception e) {
                             System.out.println("Fel datum format! Använd (yyyy-MM-dd)");
-                            System.exit(1);
                         }
                     }
                     break;
@@ -46,31 +45,41 @@ public class Main {
                                 throw new NumberFormatException();
                         } catch (NumberFormatException e) {
                             System.out.println("Ogiltig tidintervall! Använd 2h, 4h, eller 8h");
-                            System.exit(1);
                         }
                     }
                     break;
                 case "--sorterad":
                     sorted = true;
                     break;
+                case "--help":
+                    printHelp();
+                    return;
             }
         }
+        if (args.length == 0) {
+            printHelp();
+            System.out.println("Inga argument angivna, använder standardvärden:");
+            System.out.println("Zon: SE1, Tid: 2h laddning, Period: 24h framåt");
+            zone = "SE1";
+            chargingTime = 2;
+        }
         // Om Standardzon argument saknas
-        if (zone == null || !(zone.equals("SE1") || zone.equals("SE2") || zone.equals("SE3") || zone.equals("SE4"))) {
+        if (zone == null) {
             System.out.println("Error: --zone argument is required! Visar priser för SE1");
+            zone = "SE1";
+        }
+        if (!zone.equals("SE1") && !zone.equals("SE2") && !zone.equals("SE3") && !zone.equals("SE4")) {
+            System.out.println("Error: invalid zone! Visar priser för SE1");
             zone = "SE1";
         }
 
         //Om det inte finns något --date argument
-        if (endDate == null) {
-            System.out.println("Error: --date argument missing, visar priser 24h framåt ");
-            endDate = startDate.plusDays(1);
-        }
-
-        //Om slut datum är inna start datum
         if (endDate.isBefore(startDate)) {
-            System.out.println("Slut datum kan inte vara innan start datum. Visar priser 24h farmåt");
-            endDate = startDate.plusDays(1);
+            endDate = startDate;
+        }
+        if (chargingTime < 0) {
+            System.out.println("Error: chargingTime invalid. Visat för 2h period.");
+            chargingTime = 2;
         }
 
         ElpriserAPI.Prisklass selectedZone = ElpriserAPI.Prisklass.valueOf(zone);
@@ -83,18 +92,16 @@ public class Main {
         }
         if (allPrices.isEmpty()) {
             System.out.println("Inga priser tillgängliga");
-            System.exit(1);
         }
-
-        //Sorterar utskrift endast om --sorterad används
-        if (sorted) {
+        if (sorted && !allPrices.isEmpty()) {
             NumberFormat numberFormat = NumberFormat.getInstance(new Locale("sv", "SE"));
             for (ElpriserAPI.Elpris p : allPrices) {
                 System.out.println(
                         String.format("%02d-%02d %s öre",
                                 p.timeStart().getHour(),
                                 p.timeEnd().getHour(),
-                                numberFormat.format(p.sekPerKWh())));
+                                numberFormat.format(p.sekPerKWh()))
+                );
             }
         }
 
@@ -103,39 +110,57 @@ public class Main {
         for (ElpriserAPI.Elpris p : allPrices) sumPrice += p.sekPerKWh();
         double meanPrice = sumPrice / allPrices.size();
 
+
         if (chargingTime > 0) {
-            double minPrice = Double.MAX_VALUE;
-            double maxPrice = Double.MIN_VALUE;
-            ZonedDateTime minStart = null;
-            ZonedDateTime minEnd = null;
-            ZonedDateTime maxStart = null;
-            ZonedDateTime maxEnd = null;
+            if (allPrices.size() < chargingTime) {
+                System.out.println("Inte tillräckligt med priser för laddningsfönster");
+            } else {
+                double minPrice = Double.MAX_VALUE;
+                double maxPrice = Double.MIN_VALUE;
+                ZonedDateTime minStart = null;
+                ZonedDateTime minEnd = null;
+                ZonedDateTime maxStart = null;
+                ZonedDateTime maxEnd = null;
 
-            for (int i = 0; i < allPrices.size() - chargingTime; i++) {
-                double windowSum = 0;
-                for (int j = 0; j < chargingTime; j++) {
-                    windowSum += allPrices.get(i + j).sekPerKWh();
+                for (int i = 0; i < allPrices.size() - chargingTime; i++) {
+                    double windowSum = 0;
+                    for (int j = 0; j < chargingTime; j++) {
+                        windowSum += allPrices.get(i + j).sekPerKWh();
+                    }
+                    if (windowSum < minPrice) {
+                        minPrice = windowSum;
+                        minStart = allPrices.get(i).timeStart();
+                        minEnd = allPrices.get(i + chargingTime - 1).timeEnd();
+                    }
+                    if (windowSum > maxPrice) {
+                        maxPrice = windowSum;
+                        maxStart = allPrices.get(i).timeStart();
+                        maxEnd = allPrices.get(i + chargingTime - 1).timeEnd();
+                    }
                 }
-                if (windowSum < minPrice) {
-                    minPrice = windowSum;
-                    minStart = allPrices.get(i).timeStart();
-                    minEnd = allPrices.get(i + chargingTime - 1).timeEnd();
-                }
-                if (windowSum > maxPrice) {
-                    maxPrice = windowSum;
-                    maxStart = allPrices.get(i).timeStart();
-                    maxEnd = allPrices.get(i + chargingTime - 1).timeEnd();
-                }
+                NumberFormat numberFormat = NumberFormat.getInstance(new Locale("sv", "SE"));
+                double meanWindowPrice = (minPrice / chargingTime) * 100;
+                double minPriceore = minPrice * 100;
+                double maxPriceore = maxPrice * 100;
 
+                System.out.println("Laddnings tid: " + chargingTime + "h");
+                System.out.println("Påbörja laddning kl " + String.format("%02d:00", minStart.getHour()));
+                System.out.println("Medelpris för fönster: " + numberFormat.format(meanWindowPrice) + " öre");
+                System.out.println("Lägsta pris: " + numberFormat.format(minPriceore) + " öre. " +
+                        "Mellan: " + String.format("%02d", minStart.getHour()) + "-" + String.format("%02d", minEnd.getHour()));
+                System.out.println("Högsta pris: " + numberFormat.format(maxPriceore) + " öre. " +
+                        "Mellan: " + String.format("%02d", maxStart.getHour()) + "-" + String.format("%02d", maxEnd.getHour()));
             }
-            NumberFormat numberFormat = NumberFormat.getInstance(new Locale("sv", "SE"));
-            System.out.println("Laddnings tid: " + chargingTime + "h");
-            System.out.println("Medelpris: " + numberFormat.format(meanPrice) + " öre");
-            System.out.println("Lägsta pris: " + numberFormat.format(minPrice) + " öre. " +
-                    "Mellan: " + String.format("%02d", minStart.getHour()) + "-" + String.format("%02d", minEnd.getHour()));
-            System.out.println("Högsta pris: " + numberFormat.format(maxPrice) + " öre. " +
-                    "Mellan: " + String.format("%02d", maxStart.getHour()) + "-" + String.format("%02d", maxEnd.getHour()));
         }
+    }
+    public static void printHelp() {
+        System.out.println("Usage: java -jar app.jar");
+        System.out.println("Options:");
+        System.out.println(" --zone (SE1/SE2/SE3/SE4)   Välj område.");
+        System.out.println(" --date (yyyy-MM-dd)        Välj datum.");
+        System.out.println(" --charging (2h/4h/8h)      Ange laddningstid");
+        System.out.println(" --sorted                   Sorterar priser");
+        System.out.println(" --help                     Visar hjälp");
     }
 }
 
