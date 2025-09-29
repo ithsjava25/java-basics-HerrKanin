@@ -4,18 +4,17 @@ package com.example;
 import com.example.api.ElpriserAPI;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Locale;
+import java.util.*;
 
 public class Main {
     public static void main(String[] args) {
 
+        Locale svenska = new Locale("sv", "SE");
         String zone = null;
         LocalDate date = LocalDate.now();
         String charging = "2h";
         boolean help = false;
+        boolean sorted = false;
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -46,6 +45,8 @@ public class Main {
                         return;
                     }
                     break;
+                case "--sorted":
+                    sorted = true;
             }
         }
         if (help || args.length == 0) {
@@ -56,22 +57,51 @@ public class Main {
             System.out.print("Fel: --zone är obligatoriskt (SE1|SE2|SE3|SE4)");
             return;
         }
-
         List<Double> prices = getPrices(zone, date);
 
         if (prices.isEmpty()) {
-            System.out.println("Fel: Inga priser hittades. Ogiltig zon");
+            System.out.println("Fel: Inga priser hittades för " + date);
+            return;
+        }
+        if (sorted) {
+            List<Integer> hours = new ArrayList<>();
+            List<Double> priceList = new ArrayList<>(prices);
+
+            for (int i = 0; i < priceList.size(); i++) {
+                hours.add(i);
+            }
+            for (int i = 0; i < priceList.size() - 1; i++) {
+                    int minIndex = i;
+                    for (int j = i + 1; j < priceList.size(); j++) {
+                        if (priceList.get(j) < priceList.get(minIndex)) {
+                            minIndex = j;
+                        }
+                    }
+                    if (minIndex != i){
+                        double tempPrice = priceList.get(i);
+                        priceList.set(i, priceList.get(minIndex));
+                        priceList.set(minIndex, tempPrice);
+
+                        int tempHour = hours.get(i);
+                        hours.set(i, hours.get(minIndex));
+                        hours.set(minIndex, tempHour);
+                    }
+            }
+            System.out.println("Priser i stigande ordning:");
+            for (int i = 0; i < priceList.size(); i++) {
+                System.out.printf(svenska, "%02d-%02d %.2f öre%n",  hours.get(i), hours.get(i) + 1, priceList.get(i) * 100);
+            }
             return;
         }
 
-        //Bästa laddningsfönster
         int hours = switch (charging) {
             case "2h" -> 2;
             case "4h" -> 4;
             case "8h" -> 8;
             default -> 2;
         };
-
+        
+        //Bästa laddningsfönster
         if (hours < prices.size()) {
             int bestStart = 0;
             double bestSum = Double.MAX_VALUE;
@@ -86,12 +116,12 @@ public class Main {
                     bestStart = i;
                 }
             }
-            double meanPrice = bestSum / hours;
+            double meanWindowPrice = bestSum / hours;
 
             System.out.printf("Optimalt laddningsfönster (%dh)%n", hours);
-            System.out.printf(Locale.forLanguageTag("sv-SE"), "Påbörja laddning kl %02d:00, slut %02d:00, total kostnad %.2f öre%n",
+            System.out.printf(svenska, "Påbörja laddning kl %02d:00, slut %02d:00, total kostnad %.2f öre%n",
                     bestStart, bestStart + hours, bestSum * 100);
-            System.out.printf(Locale.forLanguageTag("sv-SE"), "Medelpris för fönster: %.2f öre/kWh%n", meanPrice * 100);
+            System.out.printf(svenska, "Medelpris för fönster: %.2f öre/kWh%n", meanWindowPrice * 100);
 
         }
 
@@ -102,15 +132,15 @@ public class Main {
             if (prices.get(i) < prices.get(minHourPrice)) minHourPrice = i;
             if (prices.get(i) > prices.get(maxHourPrice)) maxHourPrice = i;
         }
-        System.out.printf(Locale.forLanguageTag("sv-SE"), "Lägsta pris timme: %02d-%02d (%.2f öre/kWh)%n", minHourPrice, minHourPrice + 1, prices.get(minHourPrice) * 100);
-        System.out.printf(Locale.forLanguageTag("sv-SE"), "Högsta pris timme: %02d-%02d (%.2f öre/kWh)%n", maxHourPrice, maxHourPrice + 1, prices.get(maxHourPrice) * 100);
+        System.out.printf(svenska, "Lägsta pris timme: %02d-%02d (%.2f öre/kWh)%n", minHourPrice, minHourPrice + 1, prices.get(minHourPrice) * 100);
+        System.out.printf(svenska, "Högsta pris timme: %02d-%02d (%.2f öre/kWh)%n", maxHourPrice, maxHourPrice + 1, prices.get(maxHourPrice) * 100);
 
         // Medelpris
         double meanPrice = 0;
         for (Double price : prices) {
             meanPrice += price;
         }
-        System.out.printf(Locale.forLanguageTag("sv-SE"), "Medelpris: %.2f öre/kWh%n", (meanPrice / prices.size()) * 100);
+        System.out.printf(svenska, "Medelpris: %.2f öre/kWh%n", (meanPrice / prices.size()) * 100);
 
     }
 
@@ -148,6 +178,7 @@ public class Main {
                 --help                  (valfritt)      - visa denna hjälptext
                 """);
     }
+    private record HourPrice (int hour, double price){}
 }
 
 
