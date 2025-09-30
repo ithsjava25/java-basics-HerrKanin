@@ -4,12 +4,13 @@ package com.example;
 import com.example.api.ElpriserAPI;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 
 public class Main {
     public static void main(String[] args) {
 
-        Locale svenska = new Locale("sv", "SE");
+        Locale formatToSwedish = new Locale("sv", "SE");
         String zone = null;
         LocalDate date = LocalDate.now();
         String charging = "2h";
@@ -30,10 +31,12 @@ public class Main {
                     }
                     break;
                 case "--date":
-                    if (i + 1 < args.length) {
-                        date = LocalDate.parse(args[++i]);
-                    } else {
-                        System.out.println("Invalid-date: datum formatet måte vara (YYYY-MM-DD)");
+                    try {
+                        if (i + 1 < args.length) {
+                            date = LocalDate.parse(args[++i]);
+                        }
+                    } catch (DateTimeParseException e) {
+                        System.out.println("Fel: ogiltigt datum, formatet måste vara (yyyy-MM-dd) ");
                         return;
                     }
                     break;
@@ -58,6 +61,11 @@ public class Main {
             return;
         }
         List<Double> prices = getPrices(zone, date);
+        List<Double> pricesTomorrow = getPrices(zone, date.plusDays(1));
+
+        List<Double> allPrices = new ArrayList<>();
+        allPrices.addAll(prices);
+        allPrices.addAll(pricesTomorrow);
 
         if (prices.isEmpty()) {
             System.out.println("Fel: Inga priser hittades för " + date);
@@ -71,25 +79,25 @@ public class Main {
                 hours.add(i);
             }
             for (int i = 0; i < priceList.size() - 1; i++) {
-                    int minIndex = i;
-                    for (int j = i + 1; j < priceList.size(); j++) {
-                        if (priceList.get(j) < priceList.get(minIndex)) {
-                            minIndex = j;
-                        }
+                int minIndex = i;
+                for (int j = i + 1; j < priceList.size(); j++) {
+                    if (priceList.get(j) < priceList.get(minIndex)) {
+                        minIndex = j;
                     }
-                    if (minIndex != i){
-                        double tempPrice = priceList.get(i);
-                        priceList.set(i, priceList.get(minIndex));
-                        priceList.set(minIndex, tempPrice);
+                }
+                if (minIndex != i) {
+                    double tempPrice = priceList.get(i);
+                    priceList.set(i, priceList.get(minIndex));
+                    priceList.set(minIndex, tempPrice);
 
-                        int tempHour = hours.get(i);
-                        hours.set(i, hours.get(minIndex));
-                        hours.set(minIndex, tempHour);
-                    }
+                    int tempHour = hours.get(i);
+                    hours.set(i, hours.get(minIndex));
+                    hours.set(minIndex, tempHour);
+                }
             }
             System.out.println("Priser i stigande ordning:");
             for (int i = 0; i < priceList.size(); i++) {
-                System.out.printf(svenska, "%02d-%02d %.2f öre%n",  hours.get(i), hours.get(i) + 1, priceList.get(i) * 100);
+                System.out.printf(formatToSwedish, "%02d-%02d %.2f öre%n", hours.get(i), hours.get(i) + 1, priceList.get(i) * 100);
             }
             return;
         }
@@ -100,16 +108,16 @@ public class Main {
             case "8h" -> 8;
             default -> 2;
         };
-        
+
         //Bästa laddningsfönster
-        if (hours < prices.size()) {
+        if (hours < allPrices.size()) {
             int bestStart = 0;
             double bestSum = Double.MAX_VALUE;
 
-            for (int i = 0; i <= prices.size() - hours; i++) {
+            for (int i = 0; i <= allPrices.size() - hours; i++) {
                 double sum = 0;
                 for (int j = i; j < i + hours; j++) {
-                    sum += prices.get(j);
+                    sum += allPrices.get(j);
                 }
                 if (sum < bestSum) {
                     bestSum = sum;
@@ -118,11 +126,14 @@ public class Main {
             }
             double meanWindowPrice = bestSum / hours;
 
-            System.out.printf("Optimalt laddningsfönster (%dh)%n", hours);
-            System.out.printf(svenska, "Påbörja laddning kl %02d:00, slut %02d:00, total kostnad %.2f öre%n",
-                    bestStart, bestStart + hours, bestSum * 100);
-            System.out.printf(svenska, "Medelpris för fönster: %.2f öre/kWh%n", meanWindowPrice * 100);
+            int startHour = bestStart % 24;
+            int endHour = (bestStart + hours) % 24;
+            if (endHour == 0) endHour = 24;
 
+            System.out.printf("Optimalt laddningsfönster (%dh)%n", hours);
+            System.out.printf(formatToSwedish, "Påbörja laddning kl %02d:00, slut %02d:00, total kostnad %.2f öre%n",
+                    startHour, endHour, bestSum * 100);
+            System.out.printf(formatToSwedish, "Medelpris för fönster: %.2f öre/kWh%n", meanWindowPrice * 100);
         }
 
         // Billigaste och dyraste timme
@@ -132,15 +143,15 @@ public class Main {
             if (prices.get(i) < prices.get(minHourPrice)) minHourPrice = i;
             if (prices.get(i) > prices.get(maxHourPrice)) maxHourPrice = i;
         }
-        System.out.printf(svenska, "Lägsta pris timme: %02d-%02d (%.2f öre/kWh)%n", minHourPrice, minHourPrice + 1, prices.get(minHourPrice) * 100);
-        System.out.printf(svenska, "Högsta pris timme: %02d-%02d (%.2f öre/kWh)%n", maxHourPrice, maxHourPrice + 1, prices.get(maxHourPrice) * 100);
+        System.out.printf(formatToSwedish, "Lägsta pris timme: %02d-%02d (%.2f öre/kWh)%n", minHourPrice, minHourPrice + 1, prices.get(minHourPrice) * 100);
+        System.out.printf(formatToSwedish, "Högsta pris timme: %02d-%02d (%.2f öre/kWh)%n", maxHourPrice, maxHourPrice + 1, prices.get(maxHourPrice) * 100);
 
         // Medelpris
         double meanPrice = 0;
         for (Double price : prices) {
             meanPrice += price;
         }
-        System.out.printf(svenska, "Medelpris: %.2f öre/kWh%n", (meanPrice / prices.size()) * 100);
+        System.out.printf(formatToSwedish, "Medelpris: %.2f öre/kWh%n", (meanPrice / prices.size()) * 100);
 
     }
 
@@ -178,7 +189,7 @@ public class Main {
                 --help                  (valfritt)      - visa denna hjälptext
                 """);
     }
-    private record HourPrice (int hour, double price){}
+
 }
 
 
