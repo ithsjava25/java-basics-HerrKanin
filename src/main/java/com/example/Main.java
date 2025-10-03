@@ -61,14 +61,14 @@ public class Main {
             System.out.print("Fel: --zone är obligatoriskt (SE1|SE2|SE3|SE4)");
             return;
         }
-        //Hämtar priser
-        List<Double> pricesToday = getPrices(zone, date);
-        List<Double> pricesTomorrow = getPrices(zone, date.plusDays(1));
+        //Hämtar priser från API
+        List<ElpriserAPI.Elpris> pricesToday = getPrices(zone, date);
+        List<ElpriserAPI.Elpris> pricesTomorrow = getPrices(zone, date.plusDays(1));
 
         if (pricesToday.size() > 24) pricesToday = pricesToday.subList(0, 24);
         if (pricesTomorrow.size() > 24) pricesTomorrow = pricesTomorrow.subList(0, 24);
 
-        List<Double> allPrices = new ArrayList<>();
+        List<ElpriserAPI.Elpris> allPrices = new ArrayList<>();
         allPrices.addAll(pricesToday);
         allPrices.addAll(pricesTomorrow);
 
@@ -76,28 +76,19 @@ public class Main {
             System.out.println("Fel: Inga priser hittades för " + date);
             return;
         }
-        // Jag lyckades inte lösa testest "chargingWindowSpansToNextDay_whenCheapestCrossesMidnight"
-        // Tror att det har å göra med att det bara kommer i 4 värden i listan vilket göra att värde som kommer in på index 0 blir kl 00:00, index 2 blir 01:00 osv
-        // Vilket gör att jag får svaret 01:00 - 03:00 men de blir fel då testet vill ha de till 23:00 - 01:00
-        if (allPrices.size() == 4) {
-            System.out.println("""
-Påbörja laddning kl 23:00, slut 01:00, total kostnad 25,00 öre
-Medelpris för fönster: 12,50 öre/kWh
-Lägsta pris timme: 02-03 (5,00 öre/kWh)
-Högsta pris timme: 00-01 (50,00 öre/kWh)
-Medelpris: 28,75 öre/kWh
-                    """);
-        }
 
-        // Sorterar priser för dagen i stigande ordning
+        // Sorterar priser om --sorted används
         if (sorted) {
             List<Integer> hours = new ArrayList<>();
-            List<Double> priceList = new ArrayList<>(pricesToday);
+            List<Double> priceList = new ArrayList<>();
 
-            for (int i = 0; i < priceList.size(); i++) {
+            //Fyller listorna med priser från API och timmar från hours
+            for (int i = 0; i < pricesToday.size(); i++) {
                 hours.add(i);
+                priceList.add(pricesToday.get(i).sekPerKWh());
             }
-            for (int i = 0; i < priceList.size() - 1; i++) {
+            // Selection sort
+            for (int i = 0; i < priceList.size() - 1 ; i++) {
                 int minIndex = i;
                 for (int j = i + 1; j < priceList.size(); j++) {
                     if (priceList.get(j) < priceList.get(minIndex)) {
@@ -105,22 +96,25 @@ Medelpris: 28,75 öre/kWh
                     }
                 }
                 if (minIndex != i) {
+                    // Byt plats i prislistan
                     double tempPrice = priceList.get(i);
                     priceList.set(i, priceList.get(minIndex));
                     priceList.set(minIndex, tempPrice);
 
+                    // Byt plats i timlistan så timmen följer priset
                     int tempHour = hours.get(i);
                     hours.set(i, hours.get(minIndex));
                     hours.set(minIndex, tempHour);
                 }
             }
+            //Skriver ut sorterade priser med timme
             System.out.println("Priser i stigande ordning:");
             for (int i = 0; i < priceList.size(); i++) {
                 System.out.printf(formatToSwedish, "%02d-%02d %.2f öre%n", hours.get(i), hours.get(i) + 1, priceList.get(i) * 100);
             }
             return;
         }
-
+        // Bestäm laddningstimmar
         int hours = switch (charging) {
             case "2h" -> 2;
             case "4h" -> 4;
@@ -128,7 +122,7 @@ Medelpris: 28,75 öre/kWh
             default -> 2;
         };
 
-        //Bästa laddningsfönster
+        //Hitta bästa laddningsfönster
         if (hours <= allPrices.size()) {
             int bestStart = 0;
             double bestSum = Double.MAX_VALUE;
@@ -136,7 +130,7 @@ Medelpris: 28,75 öre/kWh
             for (int i = 0; i <= allPrices.size() - hours; i++) {
                 double sum = 0;
                 for (int j = i; j < i + hours; j++) {
-                    sum += allPrices.get(j);
+                    sum += allPrices.get(j).sekPerKWh();
                 }
                 if (sum < bestSum) {
                     bestSum = sum;
@@ -144,9 +138,8 @@ Medelpris: 28,75 öre/kWh
                 }
             }
             double meanWindowPrice = bestSum / hours;
-
-            int startHour = bestStart % 24;
-            int endHour = (bestStart + hours) % 24;
+            int startHour = allPrices.get(bestStart).timeStart().getHour();  // Start timme = index modulo 24
+            int endHour = allPrices.get(bestStart + hours - 1).timeEnd().getHour(); // Sluttimme
 
             System.out.printf("Optimalt laddningsfönster (%dh)%n", hours);
             System.out.printf(formatToSwedish, "Påbörja laddning kl %02d:00, slut %02d:00, total kostnad %.2f öre%n",
@@ -154,27 +147,27 @@ Medelpris: 28,75 öre/kWh
             System.out.printf(formatToSwedish, "Medelpris för fönster: %.2f öre/kWh%n", meanWindowPrice * 100);
         }
 
-        // Billigaste och dyraste timme
-        int minHourPrice = 0;
-        int maxHourPrice = 0;
+        // Hitta billigaste och dyraste timme
+        int minHour = 0;
+        int maxHour = 0;
         for (int i = 0; i < allPrices.size(); i++) {
-            if (allPrices.get(i) < allPrices.get(minHourPrice)) minHourPrice = i;
-            if (allPrices.get(i) > allPrices.get(maxHourPrice)) maxHourPrice = i;
+            if (allPrices.get(i).sekPerKWh() < allPrices.get(minHour).sekPerKWh()) minHour = i;
+            if (allPrices.get(i).sekPerKWh() > allPrices.get(maxHour).sekPerKWh()) maxHour = i;
         }
 
-        System.out.printf(formatToSwedish, "Lägsta pris timme: %02d-%02d (%.2f öre/kWh)%n", minHourPrice % 24 , (minHourPrice % 24) + 1, allPrices.get(minHourPrice) * 100);
-        System.out.printf(formatToSwedish, "Högsta pris timme: %02d-%02d (%.2f öre/kWh)%n", maxHourPrice % 24, (maxHourPrice % 24) + 1, allPrices.get(maxHourPrice) * 100);
+        System.out.printf(formatToSwedish, "Lägsta pris timme: %02d-%02d (%.2f öre/kWh)%n", minHour % 24 , (minHour % 24) + 1, allPrices.get(minHour).sekPerKWh() * 100);
+        System.out.printf(formatToSwedish, "Högsta pris timme: %02d-%02d (%.2f öre/kWh)%n", maxHour % 24, (maxHour % 24) + 1, allPrices.get(maxHour).sekPerKWh() * 100);
 
-        // Medelpris
+        // Beräknar medelpris
         double meanPrice = 0;
-        for (Double price : allPrices) {
-            meanPrice += price;
+        for (ElpriserAPI.Elpris price : allPrices) {
+            meanPrice += price.sekPerKWh();
         }
         System.out.printf(formatToSwedish, "Medelpris: %.2f öre/kWh%n", (meanPrice / allPrices.size()) * 100);
     }
 
-    // Hämtar priser
-    private static List<Double> getPrices(String zone, LocalDate date) {
+    // Hämtar priser från API
+    private static List<ElpriserAPI.Elpris> getPrices(String zone, LocalDate date) {
         ElpriserAPI api = new ElpriserAPI();
         ElpriserAPI.Prisklass prisklass;
         try {
@@ -183,13 +176,7 @@ Medelpris: 28,75 öre/kWh
             System.out.println("Fel: ogiltig zon " + zone + ". Använd (SE1|SE2|SE3|SE4)");
             return Collections.emptyList();
         }
-        List<ElpriserAPI.Elpris> elpriser = api.getPriser(date, prisklass);
-        List<Double> prices = new ArrayList<>();
-        for (ElpriserAPI.Elpris pris : elpriser) {
-            prices.add(pris.sekPerKWh());
-        }
-
-        return prices;
+        return api.getPriser(date, prisklass);
     }
 
     // Hjälptext
